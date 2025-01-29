@@ -11,9 +11,9 @@ OBJEXT = obj
 include source.mak
 
 COMMON_DEFINES =
-DEFINES = -DWIN32 $(COMMON_DEFINES) -DHAVE_REPOINFO_H -DHAVE_PACKCC -DREADTAGS_DSL
+DEFINES = $(COMMON_DEFINES) -DHAVE_REPOINFO_H -DHAVE_PACKCC
 INCLUDES = -I. -Ignulib -Imain -Iparsers -Ilibreadtags -Idsl
-OPT = /O2 /WX
+OPT = /O2 /WX /Zc:preprocessor
 PACKCC = packcc.exe
 GNULIB_OBJS = $(MVC_GNULIB_SRCS:.c=.obj)
 WIN32_OBJS = $(WIN32_SRCS:.c=.obj)
@@ -27,6 +27,7 @@ READTAGS_OBJS = $(READTAGS_SRCS:.c=.obj)
 UTIL_OBJS = $(UTIL_SRCS:.c=.obj)
 READTAGS_DSL_OBJS = $(READTAGS_DSL_SRCS:.c=.obj)
 OPTSCRIPT_OBJS = $(OPTSCRIPT_SRCS:.c=.obj)
+UTILTEST_OBJS = $(UTILTEST_SRCS:.c=.obj)
 
 !if "$(WITH_ICONV)" == "yes"
 DEFINES = $(DEFINES) -DHAVE_ICONV
@@ -63,7 +64,7 @@ PDBFLAG =
 {extra-cmds}.c{extra-cmds}.obj::
 	$(CC) $(OPT) $(DEFINES) $(INCLUDES) /Foextra-cmds\ /c $<
 {libreadtags}.c{libreadtags}.obj::
-	$(CC) $(OPT) $(DEFINES) $(INCLUDES) /Folibreadtags\ /c $<
+	$(CC) $(OPT) $(DEFINES) -DHAVE_CTAGS_INLINE_H $(INCLUDES) /Folibreadtags\ /c $<
 {dsl}.c{dsl}.obj::
 	$(CC) $(OPT) $(DEFINES) $(INCLUDES) /Fodsl\ /c $<
 {win32\mkstemp}.c{win32\mkstemp}.obj::
@@ -77,7 +78,7 @@ PDBFLAG =
 {gnulib\malloc}.c{gnulib\malloc}.obj::
 	$(CC) $(OPT) $(DEFINES) $(INCLUDES) /Fognulib\malloc\ /c $<
 
-all: copy_gnulib_heads $(PACKCC) ctags.exe readtags.exe optscript.exe
+all: copy_gnulib_heads $(PACKCC) ctags.exe readtags.exe optscript.exe utiltest.exe
 
 ctags: ctags.exe
 
@@ -90,6 +91,9 @@ readtags.exe: $(READTAGS_OBJS) $(READTAGS_HEADS) $(UTIL_OBJS) $(UTIL_HEADS) $(RE
 optscript.exe: $(ALL_LIB_OBJS) $(OPTSCRIPT_OBJS) $(ALL_LIB_HEADS) $(OPTSCRIPT_DSL_HEADS) $(WIN32_HEADS)
 	$(CC) $(OPT) /Fe$@ $(ALL_LIB_OBJS) $(OPTSCRIPT_OBJS) /link setargv.obj $(LIBS)
 
+utiltest.exe: $(UTIL_OBJS) $(UTIL_HEADS) $(UTILTEST_OBJS) $(UTILTEST_HEADS) $(WIN32_HEADS)
+	$(CC) $(OPT) /Fe$@ $(UTIL_OBJS) $(UTILTEST_OBJS) $(WIN32_OBJS) /link setargv.obj
+
 $(PACKCC_OBJ): $(PACKCC_SRC)
 	$(CC) /c $(OPT) /Fo$@ $(INCLUDES) $(COMMON_DEFINES) $(PACKCC_SRC)
 
@@ -98,10 +102,7 @@ $(PACKCC): $(PACKCC_OBJ)
 
 main\repoinfo.obj: main\repoinfo.c main\repoinfo.h
 
-peg\varlink.c peg\varlink.h: peg\varlink.peg $(PACKCC)
-peg\kotlin.c peg\kotlin.h: peg\kotlin.peg $(PACKCC)
-peg\thrift.c peg\thrift.h: peg\thrift.peg $(PACKCC)
-peg\elm.c peg\elm.h: peg\elm.peg $(PACKCC)
+include win32/peg_rule.mak
 
 $(RES_OBJ): win32/ctags.rc win32/ctags.exe.manifest win32/resource.h
 	$(RC) /nologo /l 0x409 /Fo$@ $*.rc

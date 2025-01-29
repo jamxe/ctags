@@ -146,7 +146,7 @@ static void initializeYACCParser (const langType language)
 	                               "^\\}",
 	                               "", "", "{tleave}{_guest=,,0end}{tleave}", NULL);
 	addLanguageTagMultiTableRegex (language, "cString",
-	                               "^[\\\\\"]+",
+	                               "^[^\\\\\"]+",
 	                               "", "", "", NULL);
 	addLanguageTagMultiTableRegex (language, "cString",
 	                               "^\\\\.",
@@ -280,6 +280,8 @@ extern parserDefinition* YACCParser (void)
 
 	parserDefinition* const def = parserNew ("YACC");
 
+	def->versionCurrent= 0;
+	def->versionAge    = 0;
 	def->enabled       = true;
 	def->extensions    = extensions;
 	def->patterns      = patterns;

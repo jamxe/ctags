@@ -17,7 +17,7 @@
 #include <string.h>
 
 #include "entry.h"
-#include "iniconf.h"
+#include "x-iniconf.h"
 #include "parse.h"
 #include "read.h"
 #include "routines.h"
@@ -82,7 +82,7 @@ static void makeSystemdReferencedUnit (const char *value, int kind, int role)
 			makeSimpleRefTag (unit, kind, role);
 			vStringClear (unit);
 		}
-		else if (! isspace ((int) *value))
+		else if (! isspace ((unsigned char) *value))
 			vStringPut (unit, *value);
 
 		value++;

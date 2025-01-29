@@ -16,7 +16,7 @@ PACKCC_FILES = misc/packcc/.gitignore   \
 	       \
 	       $(NULL)
 
-EXTRA_DIST   = README.md autogen.sh \
+EXTRA_DIST   = README.md NEWS.rst autogen.sh \
 	       misc/optlib2c \
 	       .ctags.d/exclusion.ctags .dir-locals.el .editorconfig .gdbinit .gitignore \
 	       .indent.pro .uncrustify.cfg \
@@ -39,6 +39,11 @@ EXTRA_DIST   = README.md autogen.sh \
 	       $(PEG_INPUT) $(OPTLIB2C_INPUT) $(OPTLIB2C_PCRE2_INPUT) $(TXT2CSTR_INPUT) \
 	       docs Tmain Units m4/gnulib-cache.m4
 
+if HAVE_PEGOF
+# Keeping intermediate files for debugging pegof and u-ctags buildsys.
+EXTRA_DIST   += $(PEGO_INTERMEDIATE)
+endif
+
 CLEANFILES =
 MOSTLYCLEANFILES =
 MAINTAINERCLEANFILES = autom4te.cache
@@ -60,7 +65,9 @@ noinst_LIBRARIES =
 noinst_LIBRARIES += libctags.a
 noinst_LIBRARIES += libutil.a
 
-noinst_PROGRAMS =
+noinst_PROGRAMS = utiltest
+
+AM_LDFLAGS = $(EXTRA_LDFLAGS)
 
 # packcc always uses native compiler even when cross-compiling.
 # packcc cannot use the standard Automake rule.
@@ -84,10 +91,11 @@ readtags_CPPFLAGS = -I. -I$(srcdir) -I$(srcdir)/main -I$(srcdir)/libreadtags
 if ENABLE_DEBUGGING
 readtags_CPPFLAGS+= $(DEBUG_CPPFLAGS)
 endif
-readtags_CFLAGS = $(COVERAGE_CFLAGS) $(WARNING_CFLAGS)
+readtags_CFLAGS = $(EXTRA_CFLAGS) $(WARNING_CFLAGS) $(COVERAGE_CFLAGS)
 dist_readtags_SOURCES = $(READTAGS_SRCS) $(READTAGS_HEADS)
 readtags_CPPFLAGS += $(GNULIB_CPPFLAGS)
-readtags_CPPFLAGS += -DREADTAGS_DSL -I$(srcdir)/dsl
+readtags_CPPFLAGS += -I$(srcdir)/dsl
+readtags_CPPFLAGS += -DHAVE_CTAGS_INLINE_H
 readtags_LDADD  =
 readtags_LDADD += $(GNULIB_LIBS)
 readtags_LDADD += libutil.a
@@ -126,12 +134,27 @@ libutil_a_CPPFLAGS+= $(DEBUG_CPPFLAGS)
 endif
 dist_libutil_a_SOURCES = $(UTIL_HEADS) $(UTIL_SRCS)
 
+utiltest_CPPFLAGS   = -I$(srcdir) -I$(srcdir)/main
+utiltest_CFLAGS     =
+utiltest_CFLAGS    += $(EXTRA_CFLAGS)
+utiltest_CFLAGS    += $(WARNING_CFLAGS)
+utiltest_CFLAGS    += $(COVERAGE_CFLAGS)
+if ENABLE_DEBUGGING
+utiltest_CPPFLAGS  += $(DEBUG_CPPFLAGS)
+endif
+utiltest_LDADD  =
+utiltest_LDADD += libutil.a
+dist_utiltest_SOURCES = $(UTILTEST_HEADS) $(UTILTEST_SRCS)
+
 libctags_a_CPPFLAGS = -I. -I$(srcdir) -I$(srcdir)/main -I$(srcdir)/dsl -I$(srcdir)/peg -DHAVE_PACKCC
 if ENABLE_DEBUGGING
 libctags_a_CPPFLAGS+= $(DEBUG_CPPFLAGS)
 endif
 if HAVE_STRNLEN
 libctags_a_CPPFLAGS += -DUSE_SYSTEM_STRNLEN
+endif
+if HAVE_PEGOF
+libctags_a_CPPFLAGS += -DHAVE_PEGOF
 endif
 libctags_a_CPPFLAGS+= $(GNULIB_CPPFLAGS)
 libctags_a_CPPFLAGS+= -DHAVE_REPOINFO_H
@@ -198,10 +221,27 @@ packcc_verbose = $(packcc_verbose_@AM_V@)
 packcc_verbose_ = $(packcc_verbose_@AM_DEFAULT_V@)
 packcc_verbose_0 = @echo PACKCC "    $@";
 SUFFIXES += .peg
+
+if HAVE_PEGOF
+pegof_verbose = $(pegof_verbose_@AM_V@)
+pegof_verbose_ = $(pegof_verbose_@AM_DEFAULT_V@)
+pegof_verbose_0 = @echo PEGOF "    $@";
+SUFFIXES += .pego
+
+PEGOF_FLAGS = -O all
+.peg.pego:
+	$(pegof_verbose)$(PEGOF) $(PEGOF_FLAGS) -o $(top_builddir)/peg/$(@F) -i "$<"
+.pego.c:
+	$(packcc_verbose)$(PACKCC) -o $(top_builddir)/peg/$(*F) $(top_builddir)/peg/$(<F)
+.pego.h:
+	$(packcc_verbose)$(PACKCC) -o $(top_builddir)/peg/$(*F) $(top_builddir)/peg/$(<F)
+else
 .peg.c:
 	$(packcc_verbose)$(PACKCC) -o $(top_builddir)/peg/$(*F) "$<"
 .peg.h:
 	$(packcc_verbose)$(PACKCC) -o $(top_builddir)/peg/$(*F) "$<"
+endif
+
 # You cannot use $(PACKCC) as a target name here.
 $(PEG_SRCS) $(PEG_HEADS): $(PACKCC) Makefile
 dist_libctags_a_SOURCES = $(ALL_LIB_HEADS) $(ALL_LIB_SRCS)

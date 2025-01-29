@@ -37,7 +37,7 @@
 #include "parse.h"
 #include "subparser.h"
 
-#include "ruby.h"
+#include "x-ruby.h"
 
 #include <string.h>
 
@@ -93,6 +93,12 @@ static int lineNotify (rubySubparser *s, const unsigned char **cp)
 
 		if (strncmp ((const char *)p, "name", 4) == 0)
 			p += 4;
+		else if (strncmp ((const char *)p, "add_dependency", 14) == 0)
+		{
+			p += 14;
+			role = R_GEM_RUNTIME_DEP;
+			is_attr = false;
+		}
 		else if (strncmp ((const char *)p, "add_runtime_dependency", 22) == 0)
 		{
 			p += 22;
@@ -111,9 +117,9 @@ static int lineNotify (rubySubparser *s, const unsigned char **cp)
 		if (p)
 		{
 			rubySkipWhitespace (&p);
-			if ((!is_attr) || *p == '=')
+			if (is_attr == false || *p == '=')
 			{
-				if (is_attr)
+				if (*p == '(' || *p == '=')
 				{
 					p++;
 					rubySkipWhitespace (&p);
@@ -124,6 +130,19 @@ static int lineNotify (rubySubparser *s, const unsigned char **cp)
 					vString *gem = vStringNew ();
 					p++;
 					if (rubyParseString (&p, b, gem))
+					{
+						if (role == ROLE_DEFINITION_INDEX)
+							makeSimpleTag (gem, kind);
+						else
+							makeSimpleRefTag (gem, kind, role);
+					}
+					vStringDelete (gem);
+				}
+				else if (p [0] == '%')
+				{
+					vString *gem = vStringNew ();
+					p++;
+					if (rubyParsePercentString(&p, gem))
 					{
 						if (role == ROLE_DEFINITION_INDEX)
 							makeSimpleTag (gem, kind);

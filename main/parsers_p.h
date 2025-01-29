@@ -20,6 +20,7 @@
 	PlistXMLParser, \
 	RelaxNGParser, \
 	SvgParser, \
+	XrcParser, \
 	XmlParser, \
 	XsltParser
 #else
@@ -30,6 +31,7 @@
 #define YAML_PARSER_LIST						\
 	YamlParser,									\
 	AnsiblePlaybookParser, \
+	I18nRubyGemParser, \
 	OpenAPIParser, \
 	YamlFrontMatter
 #else
@@ -41,14 +43,15 @@
 	VarlinkParser, \
 	KotlinParser,  \
 	ThriftParser,  \
-	ElmParser
+	ElmParser,     \
+	TomlParser
 #else
 #define PEG_PARSER_LIST
 #endif
 
 #ifdef HAVE_PCRE2
-#define OPTLIB2C_PCRE2_PARSER_LIST             \
-   RDocParser
+#define OPTLIB2C_PCRE2_PARSER_LIST			\
+	RDocParser
 #else
 #define OPTLIB2C_PCRE2_PARSER_LIST
 #endif
@@ -67,11 +70,14 @@
 	AutomakeParser, \
 	AwkParser, \
 	BasicParser, \
+	BatsParser, \
 	BetaParser, \
-  	BibtexParser, \
+	BibLaTeXParser, \
+	BibtexParser, \
 	ClojureParser, \
 	CMakeParser, \
 	CParser, \
+	CargoParser, \
 	CppParser, \
 	CPreProParser, \
 	CssParser, \
@@ -92,6 +98,7 @@
 	ErlangParser, \
 	FalconParser, \
 	FlexParser, \
+	ForthParser, \
 	FortranParser, \
 	FrontMatterParser, \
 	FunctionParametersParser, \
@@ -100,6 +107,7 @@
 	GDScriptParser, \
 	GemSpecParser, \
 	GoParser, \
+	GPerfParser, \
 	HaskellParser, \
 	HaxeParser, \
 	HtmlParser, \
@@ -129,8 +137,6 @@
 	MyrddinParser, \
 	NsisParser, \
 	ObjcParser, \
-	OldCppParser, \
-	OldCParser, \
 	OcamlParser, \
 	OrgParser, \
 	PasswdParser, \
@@ -138,6 +144,7 @@
 	PerlParser, \
 	Perl6Parser, \
 	PhpParser, \
+	PkgConfigParser, \
 	PodParser, \
 	PowerShellParser, \
 	ProtobufParser, \
@@ -146,9 +153,11 @@
 	PythonLoggingConfigParser, \
 	QemuHXParser, \
 	QtMocParser, \
+	QuartoParser, \
 	RMarkdownParser, \
 	RParser, \
 	RakeParser, \
+	RakuParser, \
 	R6ClassParser, \
 	RSpecParser, \
 	RexxParser, \
@@ -161,6 +170,8 @@
 	S4ClassParser, \
 	SchemeParser, \
 	SCSSParser, \
+	SELinuxInterfaceParser, \
+	SELinuxTypeEnforcementParser, \
 	ShParser, \
 	SlangParser, \
 	SmlParser, \
@@ -169,11 +180,14 @@
 	SystemTapParser, \
 	TclParser, \
 	TclOOParser, \
+	TerraformParser, \
+	TerraformVariablesParser, \
 	TexParser, \
 	TexBeamerParser, \
 	TTCNParser, \
 	Txt2tagsParser, \
 	TypeScriptParser, \
+	VParser, \
 	VeraParser, \
 	VerilogParser, \
 	SystemVerilogParser, \
@@ -182,6 +196,7 @@
 	WindResParser, \
 	YACCParser, \
 	YumRepoParser, \
-	ZephirParser
+	ZephirParser, \
+	ZshParser
 
 #endif  /* CTAGS_MAIN_PARSERS_H */

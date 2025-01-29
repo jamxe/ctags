@@ -21,7 +21,7 @@
 #include "parse.h"
 #include "subparser.h"
 
-#include "ruby.h"
+#include "x-ruby.h"
 
 #include <string.h>
 
@@ -79,6 +79,12 @@ static vString *readTask (const unsigned char **cp, bool *variable)
 	unsigned char b;
 	const unsigned char *start;
 
+	if (**cp == '(')
+	{
+		++*cp;
+		rubySkipWhitespace (cp);
+	}
+
 	switch (**cp)
 	{
 	case '\'':
@@ -93,7 +99,6 @@ static vString *readTask (const unsigned char **cp, bool *variable)
 		}
 		break;
 	case ':':
-		++*cp;
 		vstr = vStringNew ();
 		if (!rubyParseMethodName (cp, vstr))
 		{
@@ -169,20 +174,21 @@ static int parseTask (rubySubparser *s, int kind, const unsigned char **cp)
 static int parseXTask (rubySubparser *s, struct taskType *xtask, const unsigned char **cp)
 {
 	rubySkipWhitespace (cp);
-	if (**cp == '(')
+	if (**cp == '(' || **cp == '"' || **cp == '\'')
 	{
 		vString *vstr = NULL;
 		bool variable = false;
-		++*cp;
-		rubySkipWhitespace (cp);
 		vstr = readTask (cp, &variable);
 		if (vstr)
 		{
 			int r = makeSimpleRakeTag (vstr, xtask->kind, s, variable);
 			vStringDelete (vstr);
 			tagEntryInfo *e = getEntryInCorkQueue (r);
-			e->extensionFields.typeRef [0] = eStrdup ("typename");
-			e->extensionFields.typeRef [1] = eStrdup (xtask->keyword);
+			if (e)
+			{
+				e->extensionFields.typeRef [0] = eStrdup ("typename");
+				e->extensionFields.typeRef [1] = eStrdup (xtask->keyword);
+			}
 			return r;
 		}
 	}
@@ -216,7 +222,7 @@ static int lineNotify (rubySubparser *s, const unsigned char **cp)
 	for (int i = 0; i < ARRAY_SIZE(xtaskTypes); i++)
 	{
 		if (rubyCanMatchKeywordWithAssign (cp, xtaskTypes[i].keyword))
-			return parseXTask (s, xtaskTypes + i, cp);;
+			return parseXTask (s, xtaskTypes + i, cp);
 	}
 
 	return CORK_NIL;

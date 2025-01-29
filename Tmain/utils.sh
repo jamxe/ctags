@@ -1,4 +1,11 @@
 __SKIP__=77
+__INTERNAL_ERROR__=76
+
+internal_error()
+{
+	echo "$@"
+	exit ${__INTERNAL_ERROR__}
+}
 
 skip()
 {
@@ -47,6 +54,17 @@ skip_if_user_has_dot_ctags_d()
 {
 	if [ -d ~/.ctags.d ]; then
 		skip "this test case doesn't work well if you have ~/.ctags.d"
+	fi
+}
+
+skip_if_no_readtags()
+{
+	if [ -z "${1}" ]; then
+		internal_error 'skip_if_no_readtags(): missing "$1"'
+	fi
+
+	if ! [ -x "${1}" ]; then
+		skip "no readtags"
 	fi
 }
 
@@ -138,8 +156,13 @@ direq_maybe ()
 
 check_encoding()
 {
-    if iconv -l | grep -qi "$1"; then
+    if iconv -l 2> /dev/null | grep -qi "$1"; then
 		return 0
 	fi
 	skip "iconv doesn't know about the encoding: $1"
+}
+
+jdropver()
+{
+	sed -e 's/, "version": "[0-9.]*"//'
 }

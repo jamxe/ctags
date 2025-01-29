@@ -18,7 +18,7 @@
 #include "debug.h"
 #include "entry.h"
 #include "htable.h"
-#include "cpreprocessor.h"
+#include "x-cpreprocessor.h"
 #include "kind.h"
 #include "options.h"
 #include "read.h"
@@ -39,6 +39,25 @@
 /*
 *   DATA DECLARATIONS
 */
+enum eCppCharacters {
+	/* white space characters */
+	SPACE         = ' ',
+	NEWLINE       = '\n',
+	CRETURN       = '\r',
+	FORMFEED      = '\f',
+	TAB           = '\t',
+	VTAB          = '\v',
+
+	/* some hard to read characters */
+	DOUBLE_QUOTE  = '"',
+	SINGLE_QUOTE  = '\'',
+	BACKSLASH     = '\\',
+
+	/* symbolic representations, above 0xFF not to conflict with any byte */
+	STRING_SYMBOL = CPP_STRING_SYMBOL,
+	CHAR_SYMBOL   = CPP_CHAR_SYMBOL
+};
+
 typedef enum { COMMENT_NONE, COMMENT_C, COMMENT_CPLUS, COMMENT_D } Comment;
 
 enum eCppLimits {
@@ -158,10 +177,6 @@ static roleDefinition CPREPROHeaderRoles [] = {
 };
 
 
-typedef enum {
-	CPREPRO_MACRO, CPREPRO_HEADER, CPREPRO_PARAM,
-} cPreProkind;
-
 static kindDefinition CPreProKinds [] = {
 	{ true,  'd', "macro",      "macro definitions",
 	  .referenceOnly = false, ATTACH_ROLES(CPREPROMacroRoles)},
@@ -200,12 +215,12 @@ static int externalParserBlockNestLevel;
  */
 static bool BraceFormat = false;
 
-void cppPushExternalParserBlock(void)
+extern void cppPushExternalParserBlock(void)
 {
 	externalParserBlockNestLevel++;
 }
 
-void cppPopExternalParserBlock(void)
+extern void cppPopExternalParserBlock(void)
 {
 	externalParserBlockNestLevel--;
 }
@@ -461,6 +476,20 @@ extern void cppEndStatement (void)
 /*  This puts a character back into the input queue for the input File. */
 extern void cppUngetc (const int c)
 {
+	if (c == STRING_SYMBOL || c == CHAR_SYMBOL)
+	{
+		Assert(Cpp.charOrStringContents != NULL);
+		cppUngetc(c == STRING_SYMBOL ? '"' : '\'');
+		cppUngetString(vStringValue(Cpp.charOrStringContents), vStringLength(Cpp.charOrStringContents));
+		cppUngetc(c == STRING_SYMBOL ? '"' : '\'');
+		vStringClear(Cpp.charOrStringContents);
+		return;
+	}
+	else if (c == EOF)
+	{
+		return;
+	}
+
 	if(!Cpp.ungetPointer)
 	{
 		// no unget data
@@ -498,13 +527,13 @@ extern void cppUngetc (const int c)
 	Cpp.ungetDataSize++;
 }
 
-int cppUngetBufferSize()
+extern int cppUngetBufferSize(void)
 {
 	return Cpp.ungetBufferSize;
 }
 
 /*  This puts an entire string back into the input queue for the input File. */
-void cppUngetString(const char * string,int len)
+extern void cppUngetString(const char * string,int len)
 {
 	if(!string)
 		return;
@@ -871,7 +900,7 @@ static void makeIncludeTag (const  char *const name, bool systemHeader)
 	}
 }
 
-static void makeParamTag (vString *name, short nth, bool placeholder)
+static int makeParamTag (vString *name, short nth, bool placeholder)
 {
 	bool standing_alone = doesCPreProRunAsStandaloneParser(CPREPRO_MACRO);
 
@@ -888,17 +917,19 @@ static void makeParamTag (vString *name, short nth, bool placeholder)
 	{
 		e->extensionFields.nth = nth;
 		if (placeholder)
-			e->placeholder = 1;
+			markTagAsPlaceholder (e, placeholder);
 	}
+	return r;
 }
 
-static void regenreateSignatureFromParameters (vString * buffer, int from, int to)
+static void makeSignatureStringFromParameters (vString * buffer, intArray *parameters)
 {
 	vStringPut(buffer, '(');
-	for (int pindex = from; pindex < to; pindex++)
+	for (size_t i = 0; i < intArrayCount (parameters); i++)
 	{
+		int pindex = intArrayItem (parameters, i);
 		tagEntryInfo *e = getEntryInCorkQueue (pindex);
-		if (e && !isTagExtra (e))
+		if (e)
 		{
 			vStringCatS (buffer, e->name);
 			vStringPut (buffer, ',');
@@ -939,6 +970,7 @@ static int directiveDefine (const int c, bool undef)
 
 			if (p == '(')
 			{
+				intArray *params = intArrayNew ();
 				vString *param = vStringNew ();
 				int param_start = (int)countEntryInCorkQueue();
 				do {
@@ -953,7 +985,29 @@ static int directiveDefine (const int c, bool undef)
 
 					if (vStringLength (param) > 0)
 					{
-						makeParamTag (param, nth++, vStringChar(param, 0) == '.');
+						bool gnuext_placeholder = false;
+						if (vStringLength (param) > 3
+							&& strcmp(vStringValue (param) + vStringLength (param) - 3,
+									  "...")  == 0)
+						{
+							/* args... in GNU cpp extension
+							 *
+							 * #define debug(format, args...) fprintf (stderr, format, args)
+							 *
+							 * In this case, args should be tagged. However the signature field
+							 * for debug must be "(format,args...)".
+							 */
+							vString *nodots = vStringNewNInit (vStringValue (param),
+															   vStringLength (param) - 3);
+							makeParamTag (nodots, nth, false);
+							vStringDelete (nodots);
+							gnuext_placeholder = true;
+						}
+
+						int r = makeParamTag (param, nth++,
+											  vStringChar(param, 0) == '.'
+											  || gnuext_placeholder);
+						intArrayAdd (params, r);
 						vStringClear (param);
 					}
 					if (p == '\\')
@@ -965,18 +1019,18 @@ static int directiveDefine (const int c, bool undef)
 				if (p == ')')
 				{
 					vString *signature = vStringNew ();
-					regenreateSignatureFromParameters (signature, param_start, param_end);
+					makeSignatureStringFromParameters (signature, params);
 					r = makeDefineTag (vStringValue (Cpp.directive.name), vStringValue (signature), undef);
 					vStringDelete (signature);
 				}
 				else
 					r = makeDefineTag (vStringValue (Cpp.directive.name), NULL, undef);
+				intArrayDelete (params);
 
 				tagEntryInfo *e = getEntryInCorkQueue (r);
 				if (e)
 				{
-					e->lineNumber = lineNumber;
-					e->filePosition = filePosition;
+					updateTagLine (e, lineNumber, filePosition);
 					patchScopeFieldOfParameters (param_start, param_end, r);
 				}
 			}
@@ -1313,7 +1367,7 @@ static int skipOverDComment (void)
 	return c;
 }
 
-const vString * cppGetLastCharOrStringContents (void)
+extern const vString * cppGetLastCharOrStringContents (void)
 {
 	CXX_DEBUG_ASSERT(Cpp.charOrStringContents,"Shouldn't be called when CPP is not initialized");
 	return Cpp.charOrStringContents;
@@ -1332,15 +1386,24 @@ static int skipToEndOfString (bool ignoreBackslash)
 	{
 		if (c == BACKSLASH && ! ignoreBackslash)
 		{
-			vStringPutWithLimit (Cpp.charOrStringContents, c, 1024);
-			c = cppGetcFromUngetBufferOrFile ();  /* throw away next character, too */
-			if (c != EOF)
-				vStringPutWithLimit (Cpp.charOrStringContents, c, 1024);
+			int c0 = cppGetcFromUngetBufferOrFile ();
+			if (c0 == '\n')
+				continue;
+			if (c0 == EOF)
+				break;
+
+			if (vStringPutWithLimit (Cpp.charOrStringContents, c, 1024))
+			{
+				if (vStringPutWithLimit (Cpp.charOrStringContents, c0, 1024))
+					continue;
+				/* delete the last back slash at the end of the vstring. */
+				vStringChop(Cpp.charOrStringContents);
+			}
 		}
 		else if (c == DOUBLE_QUOTE)
 			break;
 		else
-			vStringPutWithLimit (Cpp.charOrStringContents, c, 1024);
+			(void)vStringPutWithLimit (Cpp.charOrStringContents, c, 1024);
 	}
 	return STRING_SYMBOL;  /* symbolic representation of string */
 }
@@ -1398,7 +1461,7 @@ static int skipToEndOfCxxRawLiteralString (void)
  *  special character to symbolically represent a generic character.
  *  Also detects Vera numbers that include a base specifier (ie. 'b1010).
  */
-static int skipToEndOfChar ()
+static int skipToEndOfChar (void)
 {
 	int c;
 	int count = 0, veraBase = '\0';
@@ -1410,10 +1473,19 @@ static int skipToEndOfChar ()
 	    ++count;
 		if (c == BACKSLASH)
 		{
-			vStringPutWithLimit (Cpp.charOrStringContents, c, 10);
-			c = cppGetcFromUngetBufferOrFile ();  /* throw away next character, too */
-			if (c != EOF)
-				vStringPutWithLimit (Cpp.charOrStringContents, c, 10);
+			int c0 = cppGetcFromUngetBufferOrFile ();
+			if (c0 == '\n')
+				continue;
+			if (c0 == EOF)
+				break;
+
+			if (vStringPutWithLimit (Cpp.charOrStringContents, c, 10))
+			{
+				if (vStringPutWithLimit (Cpp.charOrStringContents, c0, 10))
+					continue;
+				/* delete the last back slash at the end of the vstring.*/
+				vStringChop(Cpp.charOrStringContents);
+			}
 		}
 		else if (c == SINGLE_QUOTE)
 			break;
@@ -1427,7 +1499,7 @@ static int skipToEndOfChar ()
 			if (count == 1  &&  strchr ("DHOB", toupper (c)) != NULL)
 			{
 				veraBase = c;
-				vStringPutWithLimit (Cpp.charOrStringContents, c, 10);
+				(void)vStringPutWithLimit (Cpp.charOrStringContents, c, 10);
 			}
 			else if (veraBase != '\0'  &&  ! isalnum (c))
 			{
@@ -1435,10 +1507,10 @@ static int skipToEndOfChar ()
 				break;
 			}
 			else
-				vStringPutWithLimit (Cpp.charOrStringContents, c, 10);
+				(void)vStringPutWithLimit (Cpp.charOrStringContents, c, 10);
 		}
 		else
-			vStringPutWithLimit (Cpp.charOrStringContents, c, 10);
+			(void)vStringPutWithLimit (Cpp.charOrStringContents, c, 10);
 	}
 	return CHAR_SYMBOL;  /* symbolic representation of character */
 }
@@ -1446,12 +1518,12 @@ static int skipToEndOfChar ()
 static void attachFields (int macroCorkIndex, unsigned long endLine, const char *macrodef)
 {
 	tagEntryInfo *tag = getEntryInCorkQueue (macroCorkIndex);
-	if (!tag)
-		return;
-
-	tag->extensionFields.endLine = endLine;
-	if (macrodef)
-		attachParserFieldToCorkEntry (macroCorkIndex, Cpp.macrodefFieldIndex, macrodef);
+	if (tag)
+	{
+		setTagEndLine (tag, endLine);
+		if (macrodef)
+			attachParserField (tag, Cpp.macrodefFieldIndex, macrodef);
+	}
 }
 
 static vString * conditionMayFlush (vString* condition, bool del)
@@ -1495,6 +1567,29 @@ static void conditionMayPut (vString *condition, int c)
 	if (vStringLength (condition) > 0
 		|| (!isdigit(c)))
 		vStringPut(condition, c);
+}
+
+extern void cppVStringPut (vString* string, const int c)
+{
+	if (c <= 0xff)
+		vStringPut (string, c);
+	else
+	{
+		char marker = '"';
+		switch (c)
+		{
+			case CHAR_SYMBOL:
+				marker = '\'';
+				/* Fall through */
+			case STRING_SYMBOL:
+				vStringPut (string, marker);
+				vStringCat (string, cppGetLastCharOrStringContents ());
+				vStringPut (string, marker);
+				break;
+			default:
+				AssertNotReached();
+		}
+	}
 }
 
 /*  This function returns the next character, stripping out comments,
@@ -1601,8 +1696,11 @@ process:
 				/* We assume none may want to know the content of the
 				 * literal; just put ''. */
 				if (macrodef)
-					vStringCatS (macrodef, "''");
-
+				{
+					vStringPut (macrodef, '\'');
+					vStringCat (macrodef, Cpp.charOrStringContents);
+					vStringPut (macrodef, '\'');
+				}
 				break;
 
 			case '/':
@@ -1891,7 +1989,7 @@ process:
 	if (condition)
 		vStringDelete (condition);
 
-	DebugStatement ( debugPutc (DEBUG_CPP, c); )
+	DebugStatement ( cppDebugPutc (DEBUG_CPP, c); )
 	DebugStatement ( if (c == NEWLINE)
 				debugPrintf (DEBUG_CPP, "%6ld: ", getInputLineNumber () + 1); )
 
@@ -1946,7 +2044,7 @@ static bool buildMacroInfoFromTagEntry (int corkIndex,
 	return true;
 }
 
-extern cppMacroInfo * cppFindMacroFromSymtab (const char *const name)
+static cppMacroInfo * cppFindMacroFromSymtab (const char *const name)
 {
 	cppMacroInfo *info = NULL;
 	foreachEntriesInScope (CORK_NIL, name, buildMacroInfoFromTagEntry, &info);
@@ -2168,7 +2266,7 @@ static cppMacroInfo * saveMacro(hashTable *table, const char * macro)
 		return NULL;
 	}
 
-	if(!(isalpha(*c) || (*c == '_' || (*c == '$') )))
+	if(!(isalpha((unsigned char) *c) || (*c == '_' || (*c == '$') )))
 	{
 		CXX_DEBUG_LEAVE_TEXT("Macro does not start with an alphanumeric character");
 		return NULL; // must be a sequence of letters and digits
@@ -2176,7 +2274,7 @@ static cppMacroInfo * saveMacro(hashTable *table, const char * macro)
 
 	const char * identifierBegin = c;
 
-	while(*c && (isalnum(*c) || (*c == '_') || (*c == '$') ))
+	while(*c && (isalnum((unsigned char) *c) || (*c == '_') || (*c == '$') ))
 		c++;
 
 	const char * identifierEnd = c;
@@ -2309,14 +2407,14 @@ static cppMacroInfo * saveMacro(hashTable *table, const char * macro)
 
 		while(*c)
 		{
-			if(isalpha(*c) || (*c == '_'))
+			if(isalpha((unsigned char) *c) || (*c == '_'))
 			{
 				if(c > begin)
 					ADD_CONSTANT_REPLACEMENT(begin,c - begin);
 
 				const char * tokenBegin = c;
 
-				while(*c && (isalnum(*c) || (*c == '_')))
+				while(*c && (isalnum((unsigned char) *c) || (*c == '_')))
 					c++;
 
 				// check if it is a parameter
@@ -2333,13 +2431,25 @@ static cppMacroInfo * saveMacro(hashTable *table, const char * macro)
 
 					if(
 							(
+								/* #define debug(format, ...) fprintf (stderr, format, __VA_ARGS__) */
 								bIsVarArg &&
 								(paramLen == 3) &&
 								(strncmp(paramBegin[i],"...",3) == 0)
 							) || (
+								/* #define debug(MSG) fputs(MSG, stderr) */
 								(!bIsVarArg) &&
 								(paramLen == tokenLen) &&
 								(strncmp(paramBegin[i],tokenBegin,paramLen) == 0)
+							) || (
+								/* GNU cpp extension:
+								 * #define debug(format, args...) fprintf (stderr, format, args)
+								 */
+								(!bIsVarArg) &&
+								(paramLen == tokenLen + 3) &&
+								(strncmp(paramBegin[i] + tokenLen, "...", 3) == 0) &&
+								(strncmp(paramBegin[i], tokenBegin, tokenLen) == 0) &&
+								/* Let's have a side effect */
+								(bIsVarArg = true)
 							)
 						)
 					{
@@ -2486,13 +2596,14 @@ static void finalizeCpp (const langType language, bool initialized)
 	}
 }
 
-static void CpreProExpandMacrosInInput (const langType language CTAGS_ATTR_UNUSED, const char *name, const char *arg)
+static bool CpreProExpandMacrosInInput (const langType language CTAGS_ATTR_UNUSED, const char *name, const char *arg)
 {
 	doesExpandMacros = paramParserBool (arg, doesExpandMacros,
 										name, "parameter");
+	return true;
 }
 
-static void CpreProInstallIgnoreToken (const langType language CTAGS_ATTR_UNUSED, const char *optname CTAGS_ATTR_UNUSED, const char *arg)
+static bool CpreProInstallIgnoreToken (const langType language CTAGS_ATTR_UNUSED, const char *optname CTAGS_ATTR_UNUSED, const char *arg)
 {
 	if (arg == NULL || arg[0] == '\0')
 	{
@@ -2507,9 +2618,10 @@ static void CpreProInstallIgnoreToken (const langType language CTAGS_ATTR_UNUSED
 			cmdlineMacroTable = makeMacroTable ();
 		saveIgnoreToken(arg);
 	}
+	return true;
 }
 
-static void CpreProInstallMacroToken (const langType language CTAGS_ATTR_UNUSED, const char *optname CTAGS_ATTR_UNUSED, const char *arg)
+static bool CpreProInstallMacroToken (const langType language CTAGS_ATTR_UNUSED, const char *optname CTAGS_ATTR_UNUSED, const char *arg)
 {
 	if (arg == NULL || arg[0] == '\0')
 	{
@@ -2524,30 +2636,32 @@ static void CpreProInstallMacroToken (const langType language CTAGS_ATTR_UNUSED,
 			cmdlineMacroTable = makeMacroTable ();
 		saveMacro(cmdlineMacroTable, arg);
 	}
+	return true;
 }
 
-static void CpreProSetIf0 (const langType language CTAGS_ATTR_UNUSED, const char *name, const char *arg)
+static bool CpreProSetIf0 (const langType language CTAGS_ATTR_UNUSED, const char *name, const char *arg)
 {
 	doesExaminCodeWithInIf0Branch = paramParserBool (arg, doesExaminCodeWithInIf0Branch,
 													 name, "parameter");
+	return true;
 }
 
-static parameterHandlerTable CpreProParameterHandlerTable [] = {
+static paramDefinition CpreProParams [] = {
 	{ .name = "if0",
 	  .desc = "examine code within \"#if 0\" branch (true or [false])",
-	  .handleParameter = CpreProSetIf0,
+	  .handleParam = CpreProSetIf0,
 	},
 	{ .name = "ignore",
 	  .desc = "a token to be specially handled",
-	  .handleParameter = CpreProInstallIgnoreToken,
+	  .handleParam = CpreProInstallIgnoreToken,
 	},
 	{ .name = "define",
 	  .desc = "define replacement for an identifier (name(params,...)=definition)",
-	  .handleParameter = CpreProInstallMacroToken,
+	  .handleParam = CpreProInstallMacroToken,
 	},
 	{ .name = "_expand",
 	  .desc = "expand macros if their definitions are in the current C/C++/CUDA input file (true or [false])",
-	  .handleParameter = CpreProExpandMacrosInInput,
+	  .handleParam = CpreProExpandMacrosInInput,
 	}
 };
 
@@ -2563,9 +2677,23 @@ extern parserDefinition* CPreProParser (void)
 	def->fieldTable = CPreProFields;
 	def->fieldCount = ARRAY_SIZE (CPreProFields);
 
-	def->parameterHandlerTable = CpreProParameterHandlerTable;
-	def->parameterHandlerCount = ARRAY_SIZE(CpreProParameterHandlerTable);
+	def->paramTable = CpreProParams;
+	def->paramCount = ARRAY_SIZE(CpreProParams);
 
 	def->useCork = CORK_QUEUE | CORK_SYMTAB;
 	return def;
 }
+
+#ifdef DEBUG
+extern void cppDebugPutc (const int level, const int c)
+{
+	if (debug (level)  &&  c != EOF)
+	{
+		     if (c == STRING_SYMBOL)  printf ("\"string\"");
+		else if (c == CHAR_SYMBOL)    printf ("'c'");
+		else                          putchar (c);
+
+		fflush (stdout);
+	}
+}
+#endif

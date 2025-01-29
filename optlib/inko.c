@@ -178,11 +178,14 @@ extern parserDefinition* InkoParser (void)
 		  .enabled     = true,
 		  .name        = "implements",
 		  .description = "Trait being implemented",
+		  .dataType = FIELDTYPE_STRING,
 		},
 	};
 
 	parserDefinition* const def = parserNew ("Inko");
 
+	def->versionCurrent= 0;
+	def->versionAge    = 0;
 	def->enabled       = true;
 	def->extensions    = extensions;
 	def->patterns      = patterns;

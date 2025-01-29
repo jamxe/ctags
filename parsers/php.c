@@ -26,6 +26,7 @@
 #include "debug.h"
 #include "objpool.h"
 #include "promise.h"
+#include "trace.h"
 
 #define isIdentChar(c) (isalnum (c) || (c) == '_' || (c) >= 0x80)
 #define newToken() (objPoolGet (TokenPool))
@@ -238,6 +239,35 @@ typedef enum eTokenType {
 	TOKEN_QMARK,
 } tokenType;
 
+#ifdef DEBUG
+static const char *tokenTypes[] = {
+#define E(X) [TOKEN_##X] = #X
+	E(UNDEFINED),
+	E(EOF),
+	E(CHARACTER),
+	E(CLOSE_PAREN),
+	E(SEMICOLON),
+	E(COLON),
+	E(COMMA),
+	E(KEYWORD),
+	E(OPEN_PAREN),
+	E(OPERATOR),
+	E(IDENTIFIER),
+	E(STRING),
+	E(PERIOD),
+	E(OPEN_CURLY),
+	E(CLOSE_CURLY),
+	E(EQUAL_SIGN),
+	E(OPEN_SQUARE),
+	E(CLOSE_SQUARE),
+	E(VARIABLE),
+	E(AMPERSAND),
+	E(BACKSLASH),
+	E(QMARK),
+#undef E
+};
+#endif
+
 typedef struct {
 	tokenType		type;
 	keywordId		keyword;
@@ -321,8 +351,7 @@ static void initPhpEntry (tagEntryInfo *const e, const tokenInfo *const token,
 
 	initTagEntry (e, vStringValue (token->string), kind);
 
-	e->lineNumber	= token->lineNumber;
-	e->filePosition	= token->filePosition;
+	updateTagLine (e, token->lineNumber, token->filePosition);
 
 	if (access != ACCESS_UNDEFINED)
 		e->extensionFields.access = accessToString (access);
@@ -413,8 +442,7 @@ static void makeNamespacePhpTag (const tokenInfo *const token, const vString *co
 
 		initTagEntry (&e, vStringValue (name), K_NAMESPACE);
 
-		e.lineNumber	= token->lineNumber;
-		e.filePosition	= token->filePosition;
+		updateTagLine (&e, token->lineNumber, token->filePosition);
 
 		makePhpTagEntry (&e);
 	}
@@ -603,11 +631,11 @@ static void parseString (vString *const string, const int delimiter)
 		int c = getcFromInputFile ();
 
 		if (c == '\\' && (c = getcFromInputFile ()) != EOF)
-			vStringPut (string, (char) c);
+			vStringPut (string, c);
 		else if (c == EOF || c == delimiter)
 			break;
 		else
-			vStringPut (string, (char) c);
+			vStringPut (string, c);
 	}
 }
 
@@ -717,7 +745,7 @@ static void parseHeredoc (vString *const string)
 	{
 		c = getcFromInputFile ();
 
-		vStringPut (string, (char) c);
+		vStringPut (string, c);
 		if (c == '\r' || c == '\n')
 		{
 			/* new line, check for a delimiter right after.  No need to handle
@@ -728,7 +756,7 @@ static void parseHeredoc (vString *const string)
 			c = getcFromInputFile ();
 			while (c == ' ' || c == '\t')
 			{
-				vStringPut (string, (char) c);
+				vStringPut (string, c);
 				c = getcFromInputFile ();
 				indent_len++;
 			}
@@ -769,7 +797,7 @@ static void parseIdentifier (vString *const string, const int firstChar)
 	int c = firstChar;
 	do
 	{
-		vStringPut (string, (char) c);
+		vStringPut (string, c);
 		c = getcFromInputFile ();
 	} while (isIdentChar (c));
 	ungetcToInputFile (c);
@@ -903,7 +931,7 @@ getNextChar:
 	if (! InPhp)
 	{
 		unsigned long startSourceLineNumber = getSourceLineNumber ();
-		unsigned long startLineNumber = startSourceLineNumber;
+		unsigned long startLineNumber = getInputLineNumber ();
 		int startLineOffset = getInputLineOffset ();
 
 		c = findPhpStart ();
@@ -913,10 +941,8 @@ getNextChar:
 		unsigned long endLineNumber = getInputLineNumber ();
 		int endLineOffset = getInputLineOffset ();
 
-		if ((startLineNumber != endLineNumber)
-			|| (startLineOffset != endLineOffset))
-			makePromise ("HTML", startLineNumber, startLineOffset,
-						 endLineNumber, endLineOffset, startSourceLineNumber);
+		makePromise ("HTML", startLineNumber, startLineOffset,
+					 endLineNumber, endLineOffset, startSourceLineNumber);
 	}
 	else
 		c = getcFromInputFile ();
@@ -1130,6 +1156,8 @@ getNextChar:
 	}
 
 	MayBeKeyword = nextMayBeKeyword;
+
+	TRACE_PRINT("token: %s (%s)", tokenTypes[token->type], vStringValue (token->string));
 }
 
 static void readQualifiedName (tokenInfo *const token, vString *name,
@@ -1231,9 +1259,7 @@ static bool parseClassOrIface (tokenInfo *const token, const phpKind kind,
 			vString *qualifiedName = vStringNew ();
 
 			readQualifiedName (token, qualifiedName, NULL);
-			if (vStringLength (inheritance) > 0)
-				vStringPut (inheritance, ',');
-			vStringCat (inheritance, qualifiedName);
+			vStringJoin(inheritance, ',', qualifiedName);
 			if (istat == inheritance_extends && !parent)
 				parent = qualifiedName;
 			else
@@ -1710,10 +1736,42 @@ static bool parseNamespace (tokenInfo *const token)
 	return true;
 }
 
+/* skip trait uses not to confuse typerefs
+ * 	use Name;
+ * 	use \\Some\\Name;
+ * 	use Name, Other;
+ * 	use Name { method as private; }
+ * 	use Name, Other { otherMethod as public otherName; }
+ *
+ * Note that curly braces are only allowed on the last `use`, this is a syntax
+ * error:
+ * 	use Name { method as private; }, Other;
+ * This has to be split in two `use`es or reordered.
+ */
+static bool parseClassUse (tokenInfo *const token)
+{
+	do
+	{
+		readToken (token);
+		if (token->type == TOKEN_OPEN_CURLY)
+		{
+			enterScope (token, NULL, -1);
+			return true;
+		}
+	}
+	while (token->type == TOKEN_IDENTIFIER ||
+		   token->type == TOKEN_BACKSLASH ||
+		   token->type == TOKEN_COMMA);
+
+	return (token->type == TOKEN_SEMICOLON);
+}
+
 static void enterScope (tokenInfo *const parentToken,
 						const vString *const extraScope,
 						const int parentKind)
 {
+	TRACE_ENTER();
+
 	tokenInfo *token = newToken ();
 	vString *typeName = vStringNew ();
 	int origParentKind = parentToken->parentKind;
@@ -1770,6 +1828,8 @@ static void enterScope (tokenInfo *const parentToken,
 						 * is also used to i.e. "import" traits into a class */
 						if (vStringLength (token->scope) == 0)
 							readNext = parseUse (token);
+						else if (parentKind == K_CLASS || parentKind == K_TRAIT)
+							readNext = parseClassUse (token);
 						break;
 
 					case KEYWORD_namespace:	readNext = parseNamespace (token);	break;
@@ -1813,10 +1873,14 @@ static void enterScope (tokenInfo *const parentToken,
 	parentToken->parentKind = origParentKind;
 	vStringDelete (typeName);
 	deleteToken (token);
+
+	TRACE_LEAVE();
 }
 
 static void findTags (bool startsInPhpMode)
 {
+	TRACE_ENTER();
+
 	tokenInfo *const token = newToken ();
 
 	InPhp = startsInPhpMode;
@@ -1836,16 +1900,22 @@ static void findTags (bool startsInPhpMode)
 	vStringDelete (FullScope);
 	vStringDelete (CurrentNamesapce);
 	deleteToken (token);
+
+	TRACE_LEAVE();
 }
 
 static void findPhpTags (void)
 {
+	TRACE_ENTER();
 	findTags (false);
+	TRACE_LEAVE();
 }
 
 static void findZephirTags (void)
 {
+	TRACE_ENTER();
 	findTags (true);
+	TRACE_LEAVE();
 }
 
 static void initializePool (void)
