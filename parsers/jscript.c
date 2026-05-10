@@ -346,10 +346,8 @@ static const char *tokenTypeName(enum eTokenType e);
 static const char* getNameStringForCorkIndex(int index);
 static const char* getKindStringForCorkIndex(int index);
 static const char *kindName(jsKind kind);
-// #define DO_TRACING_USE_DUMP_TOKEN
-#ifdef DO_TRACING_USE_DUMP_TOKEN
 static void dumpToken (const tokenInfo *const token);
-#endif
+// #define DO_TRACING_DUMP_TOKEN_ALWAYS
 #endif
 
 static void *newPoolToken (void *createArg CTAGS_ATTR_UNUSED)
@@ -1576,13 +1574,14 @@ static void readTokenFull (tokenInfo *const token, bool include_newlines, vStrin
 	}
 }
 
-#ifdef DO_TRACING_USE_DUMP_TOKEN
-/* trace readTokenFull() */
+#ifdef DO_TRACING_DUMP_TOKEN_ALWAYS
 static void readTokenFullDebug (tokenInfo *const token, bool include_newlines, vString *const repr)
 {
 	readTokenFull (token, include_newlines, repr);
 	dumpToken (token);
 }
+
+/* trace readTokenFull() */
 # define readTokenFull readTokenFullDebug
 #endif
 
@@ -3688,9 +3687,11 @@ static void parseJsFile (tokenInfo *const token)
 }
 
 #ifdef DO_TRACING
-#ifdef DO_TRACING_USE_DUMP_TOKEN
 static void dumpToken (const tokenInfo *const token)
 {
+	if (!token)
+		return;
+
 	const char *scope_str = getNameStringForCorkIndex (token->scope);
 	const char *scope_kind_str = getKindStringForCorkIndex (token->scope);
 
@@ -3708,7 +3709,6 @@ static void dumpToken (const tokenInfo *const token)
 			scope_str, scope_kind_str);
 	}
 }
-#endif
 
 static const char*
 getNameStringForCorkIndex(int index)
@@ -3864,6 +3864,10 @@ extern parserDefinition* JavaScriptParser (void)
 	def->versionCurrent = 2;
 	def->versionAge = 2;
 
+#ifdef DO_TRACING
+	/* Dummy call: avoid warnings like "defined but not used". */
+	dumpToken(NULL);
+#endif
 	return def;
 }
 
