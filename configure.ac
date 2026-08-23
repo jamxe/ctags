@@ -526,7 +526,6 @@ AC_CHECK_HEADERS([stdbool.h])
 AC_C_CONST
 AC_OBJEXT
 AC_EXEEXT
-AC_C_TYPEOF
 
 if test "${enable_static}" = "yes"; then
 	LDFLAGS="$LDFLAGS -static"
@@ -583,7 +582,7 @@ PRETTY_ARG_VAR([DEBUG_CPPFLAGS], [(Objective) C/C++ preprocessor debug flags],
 	       [-DDEBUG])
 
 PRETTY_ARG_VAR([EXTRA_CFLAGS], [extra C compiler flags],
-	       [-std=gnu99])
+	       [-std=c99])
 PRETTY_ARG_VAR([WARNING_CFLAGS], [C compiler warning flags],
 	       [-Wall])
 
