@@ -833,11 +833,14 @@ static int advanceToken (lexerState *lexer, bool skip_whitespace, bool propagate
 
 static void initLexer (lexerState *lexer)
 {
-    advanceNChar(lexer, 2);
+    lexer->prev_c = '\0';
+    lexer->cur_c = '\0';
+    lexer->next_c = '\0';
     lexer->token_str = vStringNew();
     lexer->first_token = true;
     lexer->cur_token = TOKEN_NONE;
-    lexer->prev_c = '\0';
+
+    advanceNChar(lexer, 2);
 
     if (lexer->cur_c == '#' && lexer->next_c == '!')
     {
